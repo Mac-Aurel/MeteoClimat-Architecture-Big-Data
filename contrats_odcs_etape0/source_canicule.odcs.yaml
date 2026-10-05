@@ -1,0 +1,197 @@
+# Contrat ODCS — SOURCE : /canicule/<niveau>/<code> + /canicule/records
+# Indicateurs d'été extrême par territoire, calculés par Infoclimat.
+# RÔLE : RÉFÉRENCE D'ÉVALUATION UNIQUEMENT. On ne copie jamais ces valeurs dans le Gold,
+# sinon on ne pourrait plus s'en servir pour valider nos propres calculs.
+apiVersion: v3.1.0
+kind: DataContract
+id: episodes-extremes-source-canicule
+name: source_canicule
+version: 0.1.0
+status: draft
+domain: climat
+dataProduct: episodes_extremes
+tags: [source, bronze, reference, evaluation, canicule]
+
+description:
+  purpose: >
+    Nuits tropicales, jours >= 30 °C et >= 35 °C, rang historique de la saison et records
+    récents, par commune, EPCI ou département. Sert de référence indépendante (R5) pour
+    valider nos indicateurs_locaux agrégés par département.
+  usage: >
+    /canicule/saisons : saisons disponibles (observé : 1950 à 2025, défaut 2025).
+    /canicule/departement/<code>?annee=<AAAA> : une ligne par département et saison
+    (échelle retenue, 96 départements métropolitains x saisons 1991-2025).
+    /canicule/records?dep=<code>&limit=<n> : records récents, du plus récent au plus ancien.
+    L'ingestion aplatit la réponse territoire (indicateurs.*, couverture.*) en une ligne.
+  limitations: >
+    Échelle commune écartée : Toulouse 31555 repose sur 1 station participative StatIC
+    et 6 saisons seulement (rang 2 sur 6, peu significatif) ; Paris 75056 renvoie 404
+    (codes par arrondissement attendus). Échelle département retenue : Haute-Garonne =
+    27 stations (6 MF principales, 12 MF secondaires, 7 StatIC), 76 saisons.
+    Le département mélange stations Météo-France et participatives : la comparaison avec nos
+    indicateurs (stations MF seules) se fait en corrélation et en écart, pas en égalité.
+    Les seuils exacts (nuit tropicale, période de la saison) ne sont pas exposés.
+    Les records n'ont pas d'identifiant de station (nom et coordonnées seulement) :
+    jointure par plus proche voisin sur dim_station.
+    Mode live figé au 2026-08-12 le 2026-10-05 : non utilisé.
+
+servers:
+  - server: api_infoclimat
+    type: api
+    location: https://climato.chom.engineering/canicule
+  - server: bronze_local
+    type: local
+    path: ./bronze/{model}/*.json
+    format: json
+    delimiter: array
+
+schema:
+  - name: canicule_departement
+    physicalName: canicule_departement
+    physicalType: table
+    description: Une ligne = un département et une saison (réponse aplatie).
+    properties:
+      - name: code
+        logicalType: string
+        required: true
+        primaryKey: true
+        primaryKeyPosition: 1
+        description: Code département.
+        examples: ["31"]
+      - name: niveau
+        logicalType: string
+        required: true
+        quality:
+          - type: library
+            metric: invalidValues
+            arguments:
+              validValues: [commune, epci, departement]
+            mustBe: 0
+      - name: saison_annee
+        logicalType: integer
+        required: true
+        primaryKey: true
+        primaryKeyPosition: 2
+        logicalTypeOptions: {minimum: 1950, maximum: 2100}
+      - name: nuits_tropicales_moy
+        logicalType: number
+        description: Nuits tropicales, moyenne sur les stations du territoire.
+        logicalTypeOptions: {minimum: 0, maximum: 184}
+      - name: nuits_tropicales_max
+        logicalType: integer
+        description: Nuits tropicales de la station la plus touchée.
+        logicalTypeOptions: {minimum: 0, maximum: 184}
+      - name: jours_tx30_moy
+        logicalType: number
+        logicalTypeOptions: {minimum: 0, maximum: 184}
+      - name: jours_tx30_max
+        logicalType: integer
+        logicalTypeOptions: {minimum: 0, maximum: 184}
+      - name: jours_tx35_moy
+        logicalType: number
+        logicalTypeOptions: {minimum: 0, maximum: 184}
+      - name: jours_tx35_max
+        logicalType: integer
+        logicalTypeOptions: {minimum: 0, maximum: 184}
+      - name: rang_nuits_trop
+        logicalType: integer
+        description: Rang de la saison parmi n_saisons (1 = plus de nuits tropicales).
+        logicalTypeOptions: {minimum: 1}
+      - name: n_saisons
+        logicalType: integer
+        logicalTypeOptions: {minimum: 1}
+      - name: couverture_statut
+        logicalType: string
+        examples: ["mesuree"]
+      - name: n_stations
+        logicalType: integer
+        logicalTypeOptions: {minimum: 0}
+      - name: n_stations_statIC
+        logicalType: integer
+      - name: n_stations_mf_principale
+        logicalType: integer
+      - name: n_stations_mf_secondaire
+        logicalType: integer
+    quality:
+      - type: library
+        metric: duplicateValues
+        arguments:
+          properties: [code, saison_annee]
+        mustBe: 0
+      - type: sql
+        description: Une moyenne ne dépasse jamais le maximum, et le rang est dans [1, n_saisons].
+        query: >
+          SELECT COUNT(*) FROM canicule_departement
+          WHERE nuits_tropicales_moy > nuits_tropicales_max
+             OR jours_tx30_moy > jours_tx30_max
+             OR jours_tx35_moy > jours_tx35_max
+             OR jours_tx35_max > jours_tx30_max
+             OR rang_nuits_trop > n_saisons
+        mustBe: 0
+      - type: sql
+        description: >
+          Le total des stations couvre au moins les sources déclarées. Égalité stricte
+          non tenue par la source : Haute-Garonne 2025, n_stations = 27 pour 7 + 6 + 12 = 25
+          (2 stations sans source déclarée, à signaler au producteur).
+        query: >
+          SELECT COUNT(*) FROM canicule_departement
+          WHERE n_stations < n_stations_statIC + n_stations_mf_principale + n_stations_mf_secondaire
+        mustBe: 0
+
+  - name: canicule_records
+    physicalName: canicule_records
+    physicalType: table
+    description: Records récents par département.
+    properties:
+      - name: type
+        logicalType: string
+        required: true
+        quality:
+          - type: library
+            metric: invalidValues
+            arguments:
+              validValues: [TX, TN]
+            mustBe: 0
+      - name: periode
+        logicalType: string
+        examples: ["month"]
+      - name: periode_valeur
+        logicalType: string
+        examples: ["7"]
+      - name: valeur
+        logicalType: number
+        required: true
+        logicalTypeOptions: {minimum: -50, maximum: 50}
+      - name: date
+        logicalType: date
+        required: true
+        logicalTypeOptions: {format: yyyy-MM-dd}
+      - name: station
+        logicalType: string
+        description: Nom de la station (pas d'identifiant).
+        examples: ["Toulouse-Francazal"]
+      - name: departement
+        logicalType: string
+      - name: latitude
+        logicalType: number
+        required: true
+      - name: longitude
+        logicalType: number
+        required: true
+      - name: altitude
+        logicalType: number
+
+team:
+  name: meteo-climat
+  members:
+    - username: olade
+      name: Olade LAOUROU
+      role: owner
+
+customProperties:
+  - property: licence
+    value: Licence Ouverte Etalab 2.0 + valeur ajoutée Infoclimat
+  - property: attribution
+    value: Météo-France / Infoclimat
+  - property: usage_dans_le_projet
+    value: référence d'évaluation R5 uniquement, jamais source du Gold
