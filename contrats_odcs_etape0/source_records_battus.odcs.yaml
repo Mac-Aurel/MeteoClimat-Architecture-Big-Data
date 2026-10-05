@@ -1,0 +1,113 @@
+# Contrat ODCS — SOURCE : /dataclimat/records_battus
+# Historique daté des records battus : base du jeu de référence R2.
+apiVersion: v3.1.0
+kind: DataContract
+id: episodes-extremes-source-records-battus
+name: source_records_battus
+version: 0.1.0
+status: draft
+domain: climat
+dataProduct: episodes_extremes
+tags: [source, bronze, records, reference]
+
+description:
+  purpose: >
+    Une ligne par date où une station a établi un nouveau record chaud (TX) ou froid (TN),
+    sur toute l'année, par mois ou par saison. Sert de jeu de référence R2 : chaque record
+    battu récent doit tomber dans un épisode ou un jour atypique détecté.
+  usage: >
+    Une requête par station (?station=<mfid>), sans from/to.
+    Observé : Pontarlier 25462001 (classe 1) -> 445 lignes ; Paris-Montsouris
+    75114001 (classe 4) -> 0 ligne.
+  limitations: >
+    Seules les stations de classe d'homogénéité <= 3 ont des records battus.
+    Le tout premier jour d'une série bat forcément un record (observé : Pontarlier,
+    TN all_time de -1,5 °C le 1897-01-01). Ces records de début de série ne sont pas
+    des extrêmes : pour R2 on ne garde que les records battus après au moins 30 ans
+    de mesures, et sur la période d'évaluation.
+
+servers:
+  - server: api_infoclimat
+    type: api
+    location: https://climato.chom.engineering/dataclimat/records_battus
+  - server: bronze_local
+    type: local
+    path: ./bronze/records_battus/*.json
+    format: json
+    delimiter: array
+
+schema:
+  - name: records_battus
+    physicalName: records_battus
+    physicalType: table
+    properties:
+      - name: period_type
+        logicalType: string
+        required: true
+        quality:
+          - type: library
+            metric: invalidValues
+            arguments:
+              validValues: [all_time, month, season]
+            mustBe: 0
+      - name: period_value
+        logicalType: string
+        description: null (all_time), '1'..'12' (mois) ou spring/summer/autumn/winter.
+      - name: record_type
+        logicalType: string
+        required: true
+        description: TX = record chaud, TN = record froid.
+        quality:
+          - type: library
+            metric: invalidValues
+            arguments:
+              validValues: [TX, TN]
+            mustBe: 0
+      - name: station_code
+        logicalType: string
+        required: true
+        description: Numéro de poste Météo-France (= mfid).
+        examples: ["25462001"]
+      - name: station_name
+        logicalType: string
+        examples: ["PONTARLIER"]
+      - name: department
+        logicalType: string
+      - name: record_value
+        logicalType: number
+        required: true
+        description: Valeur du record établi ce jour-là (°C).
+        logicalTypeOptions: {minimum: -50, maximum: 50}
+      - name: record_date
+        logicalType: date
+        required: true
+        logicalTypeOptions: {format: yyyy-MM-dd}
+      - name: lat
+        logicalType: number
+      - name: lon
+        logicalType: number
+      - name: alt
+        logicalType: number
+      - name: classe_recente
+        logicalType: integer
+        logicalTypeOptions: {minimum: 1, maximum: 3}
+    quality:
+      - type: library
+        metric: duplicateValues
+        arguments:
+          properties: [station_code, period_type, period_value, record_type, record_date]
+        mustBe: 0
+        description: Un seul record par station, période, type et date.
+
+team:
+  name: equipe-big-data-ynov
+  members:
+    - username: mxdukpe
+      name: Anaïs ASSE AKAKPO
+      role: owner
+
+customProperties:
+  - property: licence
+    value: Licence Ouverte Etalab 2.0
+  - property: attribution
+    value: Météo-France (méthodologie Data For Good)

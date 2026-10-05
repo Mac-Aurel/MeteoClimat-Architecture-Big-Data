@@ -1,0 +1,182 @@
+# =====================================================================
+# Contrat de données ODCS — SOURCE : /v2/journaliere (portail Infoclimat)
+# Projet Big Data « Épisodes extrêmes » — Ynov Paris
+# Rôle : décrire ce que NOUS attendons de la source avant l'ingestion Bronze.
+# Si la source ne respecte plus ce contrat, le pipeline s'arrête.
+# =====================================================================
+apiVersion: v3.1.0          # version du standard ODCS utilisée
+kind: DataContract
+id: episodes-extremes-source-v2-journaliere
+name: source_v2_journaliere
+version: 0.3.0              # 0.3.0 : fraîcheur mesurée sur le dataset lui-même
+status: draft               # draft -> active quand l'équipe a validé
+domain: climat
+dataProduct: episodes_extremes
+tags: [source, bronze, meteo-france, infoclimat, journalier]
+
+description:
+  purpose: >
+    Mesures quotidiennes de température (tn, tx, tm) et de précipitation (rr)
+    par station, issues de la climatologie recalculée v2 du portail Infoclimat.
+    Elles alimentent la couche Bronze puis le calcul des anomalies et des épisodes extrêmes.
+  usage: >
+    Ingestion par station et par période via l'API REST (sans clé).
+    Enveloppe observée de la réponse : station.query, licence, attribution, n,
+    plafond, tronque, fenetre.debut/fin, suite (null ou {from}), temps_ms, mesures[].
+    Paginer tant que tronque = true en réémettant la requête avec from = suite.from.
+    Observé : 07486 de 1960 à 2026 -> page 1 tronquée (20 000 lignes, 1968-01-01 au
+    2022-10-07, suite 2022-10-08). Une page couvre environ 54 ans de données journalières.
+  limitations: >
+    tn/tx sont le min/max des observations DU JOUR : si statut_extremes vaut
+    'partiel' ou 'releve_unique', tx sous-estime le vrai maximum.
+    Plafond de 20 000 lignes par requête. Pas de SLA (préfiguration).
+    Fraîcheur annoncée J-1. Observé le 2026-10-05 : dernière date servie 2026-09-29
+    (retard de 6 jours). /coverage indiquait 2026-08-12 mais mesure le fonds horaire
+    canonique, pas ce dataset : la fraîcheur se mesure sur max(date) de la réponse.
+
+# --- Où se trouve la donnée -------------------------------------------
+servers:
+  - server: api_infoclimat
+    type: api
+    location: https://climato.chom.engineering/v2/journaliere
+    description: API REST JSON ouverte ; les lignes sont dans le tableau « mesures » de la réponse.
+  - server: bronze_local
+    type: local
+    path: ./bronze/v2_journaliere/*.json
+    format: json
+    delimiter: array
+    description: Copie brute de chaque réponse, écrite par le script d'ingestion.
+
+# --- Structure attendue ----------------------------------------------
+schema:
+  - name: v2_journaliere
+    physicalName: v2_journaliere
+    physicalType: table
+    description: >
+      Une ligne = une station et un jour. Dans l'API, ces lignes sont le tableau
+      « mesures » de la réponse ; le script d'ingestion les extrait dans ce fichier.
+    properties:
+      - name: ic_id
+        logicalType: string
+        required: true
+        primaryKey: true
+        primaryKeyPosition: 1
+        description: Identifiant station Infoclimat, identifiant canonique (formats hétérogènes).
+        examples: ["07486"]
+      - name: mfid
+        logicalType: string
+        required: false
+        description: Numéro de poste Météo-France (8 chiffres), même station que ic_id.
+        examples: ["38384001"]
+      - name: date
+        logicalType: date
+        required: true
+        primaryKey: true
+        primaryKeyPosition: 2
+        logicalTypeOptions:
+          format: yyyy-MM-dd
+        examples: ["2025-07-01"]
+      - name: tn
+        logicalType: number
+        description: Température minimale du jour (°C).
+        logicalTypeOptions: {minimum: -60, maximum: 50}
+        customProperties:
+          - property: unit
+            value: "°C"
+      - name: tx
+        logicalType: number
+        description: Température maximale du jour (°C).
+        logicalTypeOptions: {minimum: -60, maximum: 55}
+        customProperties:
+          - property: unit
+            value: "°C"
+      - name: tm
+        logicalType: number
+        description: (tn + tx) / 2 (°C).
+      - name: tntxm
+        logicalType: number
+        description: Alias de tm (°C). Gardé en Bronze, supprimé en Silver.
+      - name: rr
+        logicalType: number
+        description: Cumul de précipitation du jour (mm).
+        logicalTypeOptions: {minimum: 0, maximum: 1000}
+        customProperties:
+          - property: unit
+            value: "mm"
+      - name: n_obs
+        logicalType: integer
+        description: Nombre d'observations de température du jour (preuve derrière tn/tx).
+        logicalTypeOptions: {minimum: 0}
+      - name: n_obs_rejetees
+        logicalType: integer
+        description: Observations écartées par le contrôle qualité des pics isolés.
+        logicalTypeOptions: {minimum: 0}
+      - name: statut_extremes
+        logicalType: string
+        description: Fiabilité de tn/tx selon la densité d'observation (calculé par l'API).
+        quality:
+          - type: library
+            metric: invalidValues
+            arguments:
+              validValues: [quotidien, partiel, releve_unique]
+            mustBe: 0
+            description: Seules ces trois valeurs (ou null) sont attendues.
+
+    # Règles qui portent sur la table entière
+    quality:
+      - type: library
+        metric: duplicateValues
+        arguments:
+          properties: [ic_id, date]
+        mustBe: 0
+        description: Une seule ligne par station et par jour.
+      - type: sql
+        description: tn ne peut pas dépasser tx le même jour.
+        query: SELECT COUNT(*) FROM v2_journaliere WHERE tn > tx
+        mustBe: 0
+      - type: sql
+        description: Pas de date dans le futur.
+        query: SELECT COUNT(*) FROM v2_journaliere WHERE CAST(date AS DATE) > CURRENT_DATE
+        mustBe: 0
+      - type: text
+        description: >
+          Aucune réponse avec tronque = true ne doit être stockée sans que la page
+          suivante (suite.from) ait aussi été récupérée.
+
+# --- Engagements de service attendus -----------------------------------
+slaProperties:
+  - property: frequency
+    value: 1
+    unit: d
+    description: Rafraîchissement quotidien de la source.
+  - property: latency
+    value: 1
+    unit: d
+    description: >
+      Annoncé par la source : J-1 à partir de 08:00 UTC. Observé J-6 le 2026-10-05.
+      L'ingestion journalise max(date) reçu et alerte au-delà de 14 jours de retard.
+  - property: retention
+    value: 1777
+    unit: year
+    description: Profondeur d'archive maximale annoncée (année de début, variable selon les stations).
+
+# --- Qui est responsable ----------------------------------------------
+team:
+  name: equipe-big-data-ynov
+  members:
+    - username: mxdukpe
+      name: Anaïs ASSE AKAKPO
+      role: owner
+
+support:
+  - channel: documentation-source
+    url: https://portail.chom.engineering/llms-full.txt
+    description: Guide technique du portail (identifiants, pagination, pièges).
+
+customProperties:
+  - property: licence
+    value: Licence Ouverte Etalab 2.0 + politique opendata Infoclimat
+  - property: attribution
+    value: Météo-France / Infoclimat
+  - property: plafond_lignes_par_requete
+    value: 20000

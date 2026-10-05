@@ -1,0 +1,1 @@
+[{"month": 1, "day_of_month": 1, "sample_size": 30, "itn_mean": 5.39, "itn_stddev": 3.62, "itn_p20": 2.48, "itn_p80": 7.94}, {"month": 1, "day_of_month": 2, "sample_size": 30, "itn_mean": 5.56, "itn_stddev": 3.72, "itn_p20": 2.06, "itn_p80": 8.53}]

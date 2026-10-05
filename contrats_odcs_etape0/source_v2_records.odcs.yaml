@@ -1,0 +1,136 @@
+# Contrat ODCS — SOURCE : /v2/records
+# Records chaud et froid par station et par mois calendaire.
+apiVersion: v3.1.0
+kind: DataContract
+id: episodes-extremes-source-v2-records
+name: source_v2_records
+version: 0.1.0
+status: draft
+domain: climat
+dataProduct: episodes_extremes
+tags: [source, bronze, records]
+
+description:
+  purpose: >
+    Record absolu de tx (chaud) et de tn (froid) de chaque station pour chaque mois
+    calendaire, avec la 2e valeur distincte et la densité d'observation du jour du record.
+    Alimente la table Gold records et le contrôle des extrêmes suspects.
+  usage: >
+    Une requête par station, sans from/to (la clé est station x mois calendaire).
+    12 lignes attendues par station.
+  limitations: >
+    Un grand écart entre txx_max et txx_max_suivant signale un extrême isolé à vérifier.
+    Un record dont le statut n'est pas 'quotidien' repose sur peu d'observations.
+    Observé : 07486 janvier, txx_max 17.8 °C le 2025-01-25 ; tnn_min -25.8 °C le
+    1971-01-03 ; historique depuis 1941.
+
+servers:
+  - server: api_infoclimat
+    type: api
+    location: https://climato.chom.engineering/v2/records
+  - server: bronze_local
+    type: local
+    path: ./bronze/v2_records/*.json
+    format: json
+    delimiter: array
+
+schema:
+  - name: v2_records
+    physicalName: v2_records
+    physicalType: table
+    properties:
+      - name: ic_id
+        logicalType: string
+        required: true
+        primaryKey: true
+        primaryKeyPosition: 1
+        examples: ["07486"]
+      - name: mfid
+        logicalType: string
+        examples: ["38384001"]
+      - name: mois_calendaire
+        logicalType: integer
+        required: true
+        primaryKey: true
+        primaryKeyPosition: 2
+        logicalTypeOptions: {minimum: 1, maximum: 12}
+      - name: txx_max
+        logicalType: number
+        description: Record de température maximale du mois calendaire (°C).
+        logicalTypeOptions: {minimum: -40, maximum: 50}
+      - name: txx_max_date
+        logicalType: date
+        logicalTypeOptions: {format: yyyy-MM-dd}
+      - name: txx_max_suivant
+        logicalType: number
+        description: 2e valeur distincte la plus haute (°C).
+      - name: tnn_min
+        logicalType: number
+        description: Record de température minimale du mois calendaire (°C).
+        logicalTypeOptions: {minimum: -50, maximum: 35}
+      - name: tnn_min_date
+        logicalType: date
+        logicalTypeOptions: {format: yyyy-MM-dd}
+      - name: tnn_min_suivant
+        logicalType: number
+      - name: n_jours_tx
+        logicalType: integer
+        logicalTypeOptions: {minimum: 0}
+      - name: n_jours_tn
+        logicalType: integer
+        logicalTypeOptions: {minimum: 0}
+      - name: premiere_obs
+        logicalType: date
+        logicalTypeOptions: {format: yyyy-MM-dd}
+      - name: derniere_obs
+        logicalType: date
+        logicalTypeOptions: {format: yyyy-MM-dd}
+      - name: txx_max_n_obs
+        logicalType: integer
+      - name: tnn_min_n_obs
+        logicalType: integer
+      - name: txx_max_n_obs_rejetees
+        logicalType: integer
+      - name: tnn_min_n_obs_rejetees
+        logicalType: integer
+      - name: txx_max_statut
+        logicalType: string
+        quality:
+          - type: library
+            metric: invalidValues
+            arguments:
+              validValues: [quotidien, partiel, releve_unique]
+            mustBe: 0
+      - name: tnn_min_statut
+        logicalType: string
+        quality:
+          - type: library
+            metric: invalidValues
+            arguments:
+              validValues: [quotidien, partiel, releve_unique]
+            mustBe: 0
+    quality:
+      - type: library
+        metric: duplicateValues
+        arguments:
+          properties: [ic_id, mois_calendaire]
+        mustBe: 0
+      - type: sql
+        description: Le record est bien la valeur la plus haute (resp. basse).
+        query: >
+          SELECT COUNT(*) FROM v2_records
+          WHERE txx_max < txx_max_suivant OR tnn_min > tnn_min_suivant
+        mustBe: 0
+
+team:
+  name: equipe-big-data-ynov
+  members:
+    - username: mxdukpe
+      name: Anaïs ASSE AKAKPO
+      role: owner
+
+customProperties:
+  - property: licence
+    value: Licence Ouverte Etalab 2.0 + valeur ajoutée Infoclimat
+  - property: attribution
+    value: Météo-France / Infoclimat

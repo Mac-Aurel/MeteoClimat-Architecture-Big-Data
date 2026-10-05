@@ -1,0 +1,102 @@
+# Contrat ODCS — SOURCE : /dataclimat/baseline_1991_2020
+# Normale de température moyenne par station et par jour de l'année.
+apiVersion: v3.1.0
+kind: DataContract
+id: episodes-extremes-source-baseline-1991-2020
+name: source_baseline_1991_2020
+version: 0.1.0
+status: draft
+domain: climat
+dataProduct: episodes_extremes
+tags: [source, bronze, meteo-france, normales]
+
+description:
+  purpose: >
+    Normale 1991-2020 de tntxm (température moyenne) pour chaque station et chaque
+    jour calendaire. Sert à calculer l'anomalie anom_tm = tm - normale en Silver.
+  usage: >
+    Une requête par station (?station=<mfid>), sans from/to. 366 lignes attendues
+    par station (29 février inclus). Jointure Silver : station_code = dim_station.mfid.
+  limitations: >
+    Ne couvre que tntxm : les seuils de tx, tn et rr sont calculés par nous.
+    Stations de classe d'homogénéité <= 4 seulement ; sample_count >= 24 années.
+    Observé : Paris-Montsouris 75114001 est en classe 4 (présente ici, mais exclue
+    des records dataclimat qui exigent une classe <= 3).
+
+servers:
+  - server: api_infoclimat
+    type: api
+    location: https://climato.chom.engineering/dataclimat/baseline_1991_2020
+  - server: bronze_local
+    type: local
+    path: ./bronze/baseline_1991_2020/*.json
+    format: json
+    delimiter: array
+
+schema:
+  - name: baseline_1991_2020
+    physicalName: baseline_1991_2020
+    physicalType: table
+    description: Une ligne = une station et un jour calendaire.
+    properties:
+      - name: station_code
+        logicalType: string
+        required: true
+        primaryKey: true
+        primaryKeyPosition: 1
+        description: Numéro de poste Météo-France (= mfid).
+        examples: ["75114001"]
+      - name: month
+        logicalType: integer
+        required: true
+        primaryKey: true
+        primaryKeyPosition: 2
+        logicalTypeOptions: {minimum: 1, maximum: 12}
+      - name: day
+        logicalType: integer
+        required: true
+        primaryKey: true
+        primaryKeyPosition: 3
+        logicalTypeOptions: {minimum: 1, maximum: 31}
+      - name: sample_count
+        logicalType: integer
+        description: Nombre d'années contributrices.
+        logicalTypeOptions: {minimum: 24, maximum: 30}
+      - name: baseline_mean_tntxm
+        logicalType: number
+        required: true
+        description: Moyenne 1991-2020 de tntxm pour ce jour (°C).
+        logicalTypeOptions: {minimum: -30, maximum: 40}
+        customProperties:
+          - property: unit
+            value: "°C"
+      - name: classe_recente
+        logicalType: integer
+        description: Classe d'homogénéité Météo-France (1 = meilleure).
+        logicalTypeOptions: {minimum: 1, maximum: 4}
+    quality:
+      - type: library
+        metric: duplicateValues
+        arguments:
+          properties: [station_code, month, day]
+        mustBe: 0
+        description: Un seul jour calendaire par station.
+
+slaProperties:
+  - property: frequency
+    value: 1
+    unit: d
+    description: Normale figée ; rafraîchissement quotidien côté source sans changement attendu.
+
+team:
+  name: equipe-big-data-ynov
+  members:
+    - username: mxdukpe
+      name: Anaïs ASSE AKAKPO
+      role: owner
+
+customProperties:
+  - property: licence
+    value: Licence Ouverte Etalab 2.0
+  - property: attribution
+    value: Météo-France (méthodologie Data For Good)

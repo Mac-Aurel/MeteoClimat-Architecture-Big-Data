@@ -1,0 +1,150 @@
+# Contrat ODCS — SOURCE : /dataclimat/itn + /v2/itn + /dataclimat/itn_baseline
+# Indicateur Thermique National et sa normale : base du jeu de référence R1.
+apiVersion: v3.1.0
+kind: DataContract
+id: episodes-extremes-source-itn
+name: source_itn
+version: 0.2.0
+status: draft
+domain: climat
+dataProduct: episodes_extremes
+tags: [source, bronze, reference, vague-de-chaleur]
+
+description:
+  purpose: >
+    Température moyenne quotidienne de la France (30 stations) et sa normale journalière.
+    Sert à reconstruire les vagues de chaleur nationales selon la définition Météo-France
+    (jeu de référence R1 de l'évaluation).
+  usage: >
+    /dataclimat/itn et /v2/itn : datasets nationaux, paramètre station ignoré, paginer par from/to.
+    /dataclimat/itn_baseline : 366 lignes, sans paramètre.
+  limitations: >
+    Décision : la série de référence est /dataclimat/itn (Météo-France) ;
+    /v2/itn (recalculé Infoclimat) sert de contrôle croisé.
+    Observé sur août 2003 : écart de 0 à 0,43 °C entre les deux séries (max le 14),
+    mais la même vague du 2 au 17 août selon la règle officielle. Le 15 août, v2 donne
+    23,41 °C, à 0,01 °C du seuil : les jours limites peuvent différer d'une série à l'autre.
+
+servers:
+  - server: api_infoclimat
+    type: api
+    location: https://climato.chom.engineering
+  - server: bronze_local
+    type: local
+    path: ./bronze/{model}/*.json
+    format: json
+    delimiter: array
+
+schema:
+  - name: v2_itn
+    physicalName: v2_itn
+    physicalType: table
+    description: Une ligne = un jour.
+    properties:
+      - name: date
+        logicalType: date
+        required: true
+        primaryKey: true
+        logicalTypeOptions: {format: yyyy-MM-dd}
+      - name: year
+        logicalType: integer
+      - name: month
+        logicalType: integer
+        logicalTypeOptions: {minimum: 1, maximum: 12}
+      - name: day_of_month
+        logicalType: integer
+        logicalTypeOptions: {minimum: 1, maximum: 31}
+      - name: is_fictive
+        logicalType: boolean
+        description: 29 février synthétique (toujours false dans ce build).
+      - name: itn
+        logicalType: number
+        description: Indicateur Thermique National du jour (°C).
+        logicalTypeOptions: {minimum: -15, maximum: 35}
+    quality:
+      - type: library
+        metric: duplicateValues
+        arguments:
+          properties: [date]
+        mustBe: 0
+
+  - name: dataclimat_itn
+    physicalName: dataclimat_itn
+    physicalType: table
+    description: ITN officiel Météo-France, une ligne par jour. Série de référence (R1).
+    properties:
+      - name: date
+        logicalType: date
+        required: true
+        primaryKey: true
+        logicalTypeOptions: {format: yyyy-MM-dd}
+      - name: year
+        logicalType: integer
+      - name: month
+        logicalType: integer
+        logicalTypeOptions: {minimum: 1, maximum: 12}
+      - name: day_of_month
+        logicalType: integer
+        logicalTypeOptions: {minimum: 1, maximum: 31}
+      - name: is_fictive
+        logicalType: boolean
+        description: TRUE si 29 février synthétique (à exclure des calculs).
+      - name: itn
+        logicalType: number
+        required: true
+        logicalTypeOptions: {minimum: -15, maximum: 35}
+    quality:
+      - type: library
+        metric: duplicateValues
+        arguments:
+          properties: [date]
+        mustBe: 0
+
+  - name: itn_baseline
+    physicalName: itn_baseline
+    physicalType: table
+    description: Normale 1991-2020 de l'ITN, une ligne par jour calendaire.
+    properties:
+      - name: month
+        logicalType: integer
+        required: true
+        primaryKey: true
+        primaryKeyPosition: 1
+        logicalTypeOptions: {minimum: 1, maximum: 12}
+      - name: day_of_month
+        logicalType: integer
+        required: true
+        primaryKey: true
+        primaryKeyPosition: 2
+        logicalTypeOptions: {minimum: 1, maximum: 31}
+      - name: sample_size
+        logicalType: integer
+      - name: itn_mean
+        logicalType: number
+      - name: itn_stddev
+        logicalType: number
+        logicalTypeOptions: {minimum: 0}
+      - name: itn_p20
+        logicalType: number
+      - name: itn_p80
+        logicalType: number
+    quality:
+      - type: sql
+        description: Les percentiles encadrent la moyenne.
+        query: SELECT COUNT(*) FROM itn_baseline WHERE itn_p20 > itn_mean OR itn_mean > itn_p80
+        mustBe: 0
+
+team:
+  name: equipe-big-data-ynov
+  members:
+    - username: mxdukpe
+      name: Anaïs ASSE AKAKPO
+      role: owner
+
+customProperties:
+  - property: licence
+    value: Licence Ouverte Etalab 2.0
+  - property: attribution
+    value: Météo-France / Infoclimat
+  - property: definition_vague_de_chaleur
+    value: ITN >= 25,3 °C au moins 1 jour et >= 23,4 °C au moins 3 jours ; fin si < 23,4 °C 2 jours de suite ou < 22,4 °C

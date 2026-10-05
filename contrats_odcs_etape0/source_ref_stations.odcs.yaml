@@ -1,0 +1,143 @@
+# Contrat ODCS — SOURCE : /ref/stations (référentiel des stations)
+# Devient la dimension dim_station en Silver.
+apiVersion: v3.1.0
+kind: DataContract
+id: episodes-extremes-source-ref-stations
+name: source_ref_stations
+version: 0.1.0
+status: draft
+domain: climat
+dataProduct: episodes_extremes
+tags: [source, bronze, referentiel, geo]
+
+description:
+  purpose: >
+    Identité, position et réseau de chaque station : sert à joindre les mesures
+    (ic_id <-> mfid), à placer les stations sur la carte et à calculer les voisins
+    dans un rayon donné (analyse spatiale, regroupement d'épisodes).
+  usage: >
+    Une seule requête, sans pagination (référentiel non plafonné).
+    La réponse est un GeoJSON : {type: FeatureCollection, licence, attribution, n, features[]}.
+    Observé le 2026-10-05 : n = 21 652 stations, tous réseaux confondus.
+    L'ingestion stocke la réponse brute, puis extrait les objets station
+    (ceux qui portent ic_id) dans ./bronze/ref_stations/ pour le test du contrat.
+  limitations: >
+    Le référentiel mélange les réseaux : la 1re station observée (ME153) est un poste
+    participatif StatIC sans mfid. Notre sélection garde : mfid non nul,
+    acces.dataclimat non nul, pays = FR, département métropolitain.
+    Champs présents dans la réponse mais absents de la doc du portail : reseau, acces.
+
+servers:
+  - server: api_infoclimat
+    type: api
+    location: https://climato.chom.engineering/ref/stations
+  - server: bronze_local
+    type: local
+    path: ./bronze/ref_stations/*.json
+    format: json
+    delimiter: array
+
+schema:
+  - name: ref_stations
+    physicalName: ref_stations
+    physicalType: table
+    description: Une ligne = une station.
+    properties:
+      - name: station_uid
+        logicalType: string
+        required: true
+        description: uuid5 dérivé de ic_id (change si ic_id change).
+        logicalTypeOptions: {format: uuid}
+      - name: ic_id
+        logicalType: string
+        required: true
+        primaryKey: true
+        description: Identifiant canonique, formats hétérogènes (07486, ME153, STATIC0253).
+        examples: ["07486", "ME153"]
+      - name: mfid
+        logicalType: string
+        description: Numéro de poste Météo-France ; null hors réseau Météo-France.
+        examples: ["38384001"]
+      - name: reseau
+        logicalType: string
+        description: Réseau d'origine (valeurs à inventorier, observé static).
+        examples: ["static"]
+      - name: genre
+        logicalType: string
+        examples: ["static", "synop"]
+      - name: type_poste
+        logicalType: string
+      - name: libelle
+        logicalType: string
+      - name: libelle_source
+        logicalType: string
+      - name: latitude
+        logicalType: number
+        required: true
+        logicalTypeOptions: {minimum: -90, maximum: 90}
+      - name: longitude
+        logicalType: number
+        required: true
+        logicalTypeOptions: {minimum: -180, maximum: 180}
+      - name: altitude
+        logicalType: integer
+        description: Altitude (m).
+        logicalTypeOptions: {minimum: -100, maximum: 5000}
+      - name: departement
+        logicalType: string
+        examples: ["56"]
+      - name: pays
+        logicalType: string
+        examples: ["FR"]
+      - name: ouverte
+        logicalType: boolean
+      - name: dh_ouverture
+        logicalType: timestamp
+      - name: publiable
+        logicalType: boolean
+      - name: parametres_mesures
+        logicalType: array
+        description: Clés canoniques des paramètres réellement observés.
+        items:
+          logicalType: string
+      - name: derniere_activite
+        logicalType: timestamp
+        logicalTypeOptions: {format: "yyyy-MM-ddTHH:mm:ssZ"}
+      - name: acces
+        logicalType: object
+        description: >
+          Identifiant à utiliser pour chaque famille d'API (v2, ic, legacy, dataclimat,
+          statIC, ref) ; null si la station n'est pas servie par cette famille.
+        properties:
+          - name: v2
+            logicalType: string
+          - name: ic
+            logicalType: string
+          - name: legacy
+            logicalType: string
+          - name: dataclimat
+            logicalType: string
+          - name: statIC
+            logicalType: string
+          - name: ref
+            logicalType: string
+    quality:
+      - type: library
+        metric: duplicateValues
+        arguments:
+          properties: [ic_id]
+        mustBe: 0
+        description: Un ic_id = une station.
+
+team:
+  name: equipe-big-data-ynov
+  members:
+    - username: mxdukpe
+      name: Anaïs ASSE AKAKPO
+      role: owner
+
+customProperties:
+  - property: licence
+    value: politique opendata Infoclimat (les métadonnées officielles restent sous la licence de leur producteur)
+  - property: attribution
+    value: Infoclimat / Météo-France
