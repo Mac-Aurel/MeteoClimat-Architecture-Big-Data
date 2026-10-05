@@ -89,10 +89,10 @@ slaProperties:
     description: Normale figée ; rafraîchissement quotidien côté source sans changement attendu.
 
 team:
-  name: equipe-big-data-ynov
+  name: meteo-climat
   members:
-    - username: mxdukpe
-      name: Anaïs ASSE AKAKPO
+    - username: olade
+      name: LAOUROU Olade
       role: owner
 
 customProperties:

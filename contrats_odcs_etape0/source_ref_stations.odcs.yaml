@@ -130,10 +130,10 @@ schema:
         description: Un ic_id = une station.
 
 team:
-  name: equipe-big-data-ynov
+  name: meteo-climat
   members:
-    - username: mxdukpe
-      name: Anaïs ASSE AKAKPO
+    - username: olade
+      name: LAOUROU Olade
       role: owner
 
 customProperties:

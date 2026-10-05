@@ -100,10 +100,10 @@ schema:
         description: Un seul record par station, période, type et date.
 
 team:
-  name: equipe-big-data-ynov
+  name: meteo-climat
   members:
-    - username: mxdukpe
-      name: Anaïs ASSE AKAKPO
+    - username: olade
+      name: LAOUROU Olade
       role: owner
 
 customProperties:

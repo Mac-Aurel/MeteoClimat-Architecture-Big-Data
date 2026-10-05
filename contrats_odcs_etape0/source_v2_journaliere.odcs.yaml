@@ -162,10 +162,10 @@ slaProperties:
 
 # --- Qui est responsable ----------------------------------------------
 team:
-  name: equipe-big-data-ynov
+  name: meteo-climat
   members:
-    - username: mxdukpe
-      name: Anaïs ASSE AKAKPO
+    - username: olade
+      name: LAOUROU Olade
       role: owner
 
 support:
