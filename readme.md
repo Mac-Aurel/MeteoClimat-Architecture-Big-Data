@@ -1,6 +1,6 @@
 # Dossier d'architecture Big Data — Épisodes extrêmes
 
-Oct 4, 2026 · @mxdukpè
+Oct 4, 2026 · @Mac-Aurel
 
 ## 1. Le projet en une page
 
