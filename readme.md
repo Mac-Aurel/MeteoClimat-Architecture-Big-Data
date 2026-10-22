@@ -75,7 +75,7 @@ Nous retenons 7 endpoints : un pour les mesures, deux pour les références (nor
 | `/dataclimat/baseline_1991_2020` | Normale journalière par station | Référence officielle pour calculer l'anomalie de température moyenne |
 | `/v2/records` | Records chaud / froid par station et par mois calendaire | Donne le record et la 2e valeur : un grand écart signale un extrême isolé (suspect) |
 | `/dataclimat/records_battus` | Historique des records battus, daté | Événements « certifiés » : sert de jeu de référence local pour l'évaluation |
-| `/v2/itn` et `/dataclimat/itn_baseline` | Température moyenne nationale quotidienne et sa normale | Permet de reconstruire la liste officielle des vagues de chaleur Météo-France = vérité terrain nationale |
+| `/dataclimat/itn`, `/v2/itn` et `/dataclimat/itn_baseline` | Température moyenne nationale quotidienne et sa normale | Permet de reconstruire la liste officielle des vagues de chaleur Météo-France = vérité terrain nationale |
 | `/ref/station-parametre` | Profondeur des séries par station | Sélectionner les stations ayant des séries longues et continues |
 
 **Critères de sélection des stations (à justifier dans le dossier) :**
@@ -237,10 +237,11 @@ On évalue deux choses distinctes : la **qualité de détection** (trouve-t-on l
 
 | Référence | Construction | Ce qu'elle permet de tester |
 | --- | --- | --- |
-| R1 — Vagues de chaleur nationales | Appliquer la définition officielle Météo-France à `/v2/itn`. Vérification : Météo-France recense 54 vagues de chaleur depuis 1947 (été 2026), notre reconstruction doit retrouver ce décompte | Détection des épisodes chauds à grande échelle, dates de début et de fin |
+| R1 — Vagues de chaleur nationales | Appliquer la définition officielle Météo-France à `/dataclimat/itn` (série Météo-France), `/v2/itn` en contrôle croisé (`vagues_chaleur_itn.py`). Vérification : Météo-France recense 54 vagues de chaleur depuis 1947 (été 2026), notre reconstruction doit retrouver ce décompte | Détection des épisodes chauds à grande échelle, dates de début et de fin |
 | R2 — Records battus | `/dataclimat/records_battus` (stations de classe ≤ 3) | Les jours de record doivent appartenir à un épisode ou être classés atypiques, et pas « suspects capteur » |
 | R3 — Événements célèbres annotés à la main | 30 à 50 événements connus, dates et régions vérifiées dans les bilans Météo-France : canicule août 2003, vague de froid février 2012, épisodes cévenols (Gard 2002, Aude 2018), tempête Alex 2020, vagues de chaleur 2019, 2022, 2025… | Froid et pluie, que R1 ne couvre pas ; contrôle de l'emprise régionale |
 | R4 — Périodes calmes | Périodes tirées au hasard sans alerte connue | Mesurer les fausses alertes |
+| R5 — Indicateurs canicule Infoclimat | `/canicule/departement` (nuits tropicales, jours ≥ 30 et ≥ 35 °C par département et saison), jamais copié dans le Gold | Nos `indicateurs_locaux` agrégés par département : corrélation et écart, pas égalité (la source mélange stations MF et participatives) |
 
 **Règle anti-triche :** les paramètres (seuils, `eps_km`, `eps_jours`) sont réglés sur 1991-2010 et l'évaluation finale porte sur 2011 → aujourd'hui. Sinon on mesure la mémoire du modèle, pas sa qualité.
 
@@ -395,8 +396,9 @@ Contrats à écrire, un par endpoint retenu :
 - [x] `source_itn` v0.2.0 (ITN Météo-France, ITN v2 et normale) — 50 contrôles OK
 - [x] `source_ref_stations` v0.1.0 — 38 contrôles OK
 - [x] `source_records_battus` v0.1.0 — 25 contrôles OK
+- [x] `source_canicule` v0.1.0 (référence R5, évaluation uniquement) — 43 contrôles OK
 
-Étape 0 terminée : 6 contrats, 198 contrôles validés sur des échantillons réels.
+Étape 0 terminée : 7 contrats, 241 contrôles validés sur des échantillons réels.
 
 Outil : `datacontract-cli` (`datacontract lint` vérifie que le fichier respecte ODCS ; `datacontract test` exécute les règles sur les données).
 
@@ -420,6 +422,7 @@ Outil : `datacontract-cli` (`datacontract lint` vérifie que le fichier respecte
 | `/v2/records` (07486, janvier) | Record chaud 17,8 °C le 2025-01-25, record froid −25,8 °C le 1971-01-03, statut quotidien | Contrat confirmé |
 | `/dataclimat/itn` vs `/v2/itn` (août 2003) | Écart de 0 à 0,43 °C ; les deux séries donnent la même vague du 2 au 17 août (max 29,38 et 29,16 °C) ; v2 passe à 0,01 °C du seuil le 15 | Référence R1 = `/dataclimat/itn` (Météo-France), v2 en contrôle croisé ; règle codée dans `vagues_chaleur_itn.py` |
 | `/dataclimat/itn_baseline` | Moyenne, écart-type, P20, P80 par jour | Contrat confirmé |
+| `/canicule/departement/31` (2025) et `/canicule/records?dep=31` | 1 ligne : 27 stations dont 7 StatIC, rang 4 sur 76 saisons ; records sans identifiant de station ; commune Toulouse 31555 = 1 station StatIC sur 6 saisons, Paris 75056 en 404 | Échelle département retenue, référence R5 en corrélation (pas en égalité) ; records joints par plus proche voisin sur `dim_station` |
 
 ## 11. Glossaire et questions probables du jury
 
